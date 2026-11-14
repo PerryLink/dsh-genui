@@ -592,13 +592,14 @@ function repairNodeFields(value: unknown, ctx: RepairCtx, depth: number): GenuiN
       }
     }
     case 'select': {
-      const options = repairStrings(v.options, GENUI_LIMITS.maxOptions, GENUI_LIMITS.maxString)
+      const indices: number[] = []
+      const options = repairStrings(v.options, GENUI_LIMITS.maxOptions, GENUI_LIMITS.maxString, indices)
       if (options === undefined) return null
       return {
         type: 'select', options,
         ...opt('label', str(v.label, GENUI_LIMITS.maxString)),
         ...opt('action', str(v.action, 200)),
-        ...opt('selected', int(v.selected, 0, options.length - 1)),
+        ...opt('selected', repairOptionIndex(int(v.selected, 0, Array.isArray(v.options) ? v.options.length - 1 : 0), indices)),
         ...opt('id', str(v.id, 200)),
       }
     }
@@ -806,20 +807,20 @@ function repairNodeFields(value: unknown, ctx: RepairCtx, depth: number): GenuiN
       return { type: 'code', code, ...opt('lang', str(v.lang, 64)) }
     }
     case 'radio': {
-      const options = repairStrings(v.options, GENUI_LIMITS.maxOptions, GENUI_LIMITS.maxString)
+      const indices: number[] = []
+      const options = repairStrings(v.options, GENUI_LIMITS.maxOptions, GENUI_LIMITS.maxString, indices)
       if (options === undefined) return null
       return {
         type: 'radio', options,
         ...opt('label', str(v.label, GENUI_LIMITS.maxString)),
-        ...opt('selected', int(v.selected, 0, options.length - 1)),
+        ...opt('selected', repairOptionIndex(int(v.selected, 0, Array.isArray(v.options) ? v.options.length - 1 : 0), indices)),
         ...opt('action', str(v.action, 200)),
         ...opt('group', str(v.group, 200)),
         // answer: option index (number) or label (string); out-of-range
         // indices are DROPPED (clamping would silently grade against the
         // wrong option)
-        ...opt('answer', typeof v.answer === 'number' && Number.isFinite(v.answer)
-          && v.answer >= 0 && v.answer < options.length
-          ? Math.trunc(v.answer)
+        ...opt('answer', typeof v.answer === 'number'
+          ? repairOptionIndex(v.answer, indices)
           : typeof v.answer === 'string' ? v.answer.slice(0, 512) : undefined),
         ...opt('explanation', str(v.explanation, GENUI_LIMITS.maxString)),
       }
@@ -997,13 +998,21 @@ function jsonValueTooDeep(value: unknown, limit: number): boolean {
   return false
 }
 
-function repairStrings(v: unknown, cap: number, strCap: number): string[] | undefined {
+/** Keep numeric selections tied to their original option, never its successor. */
+function repairOptionIndex(value: unknown, indices: readonly number[]): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+  const repaired = indices.indexOf(Math.trunc(value))
+  return repaired < 0 ? undefined : repaired
+}
+
+function repairStrings(v: unknown, cap: number, strCap: number, indices?: number[]): string[] | undefined {
   if (!Array.isArray(v)) return undefined
   const out: string[] = []
-  for (const item of v) {
+  for (const [index, item] of v.entries()) {
     if (out.length >= cap) break
     if (typeof item === 'string') {
       out.push(item.slice(0, strCap))
+      indices?.push(index)
     } else if (item !== null && typeof item === 'object') {
       // 兼容模型误用对象数组（如把 ask_user_question 的 {label,description}
       // 格式错用到 select/radio 的 options）——提取可读字段，而不是静默丢
@@ -1018,6 +1027,7 @@ function repairStrings(v: unknown, cap: number, strCap: number): string[] | unde
       // throwing out of repair.
       if (label === undefined && jsonValueTooDeep(item, GENUI_LIMITS.maxJsonDepth)) continue
       out.push((label ?? JSON.stringify(item)).slice(0, strCap))
+      indices?.push(index)
     }
   }
   return out

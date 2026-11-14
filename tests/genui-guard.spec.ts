@@ -282,6 +282,35 @@ describe('repairGenuiSpec: node-level healing', () => {
       .toEqual({ type: 'select', options: ['A'] })
   })
 
+  it.each(['select', 'radio'] as const)('preserves option identity after dropping a deep object: %s', type => {
+    let deep: unknown = 'leaf'
+    for (let i = 0; i <= GENUI_LIMITS.maxJsonDepth; i++) deep = { a: deep }
+    for (const selected of [0, 2, 3]) {
+      const result = processGenuiSpec({ items: [{
+        type, options: ['A', deep, 'C', 'D'], selected,
+        ...(type === 'radio' ? { answer: selected } : {}),
+      }] })
+      const index = selected === 0 ? 0 : selected - 1
+      expect(result.spec?.items[0]).toEqual({
+        type, options: ['A', 'C', 'D'], selected: index,
+        ...(type === 'radio' ? { answer: index } : {}),
+      })
+    }
+    const removed = processGenuiSpec({ items: [{
+      type, options: ['A', deep, 'C'], selected: 1,
+      ...(type === 'radio' ? { answer: 1 } : {}),
+    }] })
+    expect(removed.spec?.items[0]).toEqual({ type, options: ['A', 'C'] })
+  })
+
+  it('does not retarget a capped option or change a label-based radio answer', () => {
+    const options = Array.from({ length: GENUI_LIMITS.maxOptions + 1 }, (_, i) => `option-${i}`)
+    const capped = repairGenuiSpec({ items: [{ type: 'radio', options, selected: GENUI_LIMITS.maxOptions, answer: GENUI_LIMITS.maxOptions }] })
+    expect(capped?.items[0]).toEqual({ type: 'radio', options: options.slice(0, GENUI_LIMITS.maxOptions) })
+    expect(repairGenuiSpec({ items: [{ type: 'radio', options: ['A', null, 'C'], selected: 2, answer: 'C' }] })?.items[0])
+      .toEqual({ type: 'radio', options: ['A', 'C'], selected: 1, answer: 'C' })
+  })
+
   it('drops invalid chart without data or series but keeps series-only charts', () => {
     const spec = repairGenuiSpec({ items: [
       { type: 'chart' },
