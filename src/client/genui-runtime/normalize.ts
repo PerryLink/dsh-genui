@@ -132,7 +132,10 @@ function normalizeRecordTree(
   warnings: GenuiDiagnostic[],
 ): unknown {
   if (Array.isArray(value)) {
-    return value.map((entry, index) => normalizeRecordTree(entry, definition, `${at}[${index}]`, type, warnings))
+    // A record collection is flat. Nested arrays are malformed records, not
+    // another collection to normalize; leave them for field validation.
+    return value.map((entry, index) => Array.isArray(entry)
+      ? entry : normalizeRecordTree(entry, definition, `${at}[${index}]`, type, warnings))
   }
   const holder = record(value)
   if (holder === undefined) return value
@@ -165,8 +168,9 @@ function normalizeRecordTree(
  * affordance depends on the marker (issue #186).
  */
 function defaultFileTreeDirectories(value: unknown, depth = 0): unknown {
-  if (Array.isArray(value)) return value.map(entry => defaultFileTreeDirectories(entry, depth))
   if (depth > GENUI_LIMITS.maxTreeDepth) return value
+  if (Array.isArray(value)) return value.map(entry => Array.isArray(entry)
+    ? entry : defaultFileTreeDirectories(entry, depth))
   const holder = record(value)
   if (holder === undefined) return value
   const out = { ...holder }

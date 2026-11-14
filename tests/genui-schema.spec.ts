@@ -557,6 +557,28 @@ describe('GenUI runtime schema normalization', () => {
 })
 
 describe('GenUI pre-validation walks: depth guards', () => {
+  it.each(['file-tree', 'keyvalue'] as const)('rejects deeply nested record arrays without recursive normalization: %s', type => {
+    let nested: unknown = type === 'file-tree' ? { name: 'leaf' } : { key: 'a', value: 'b' }
+    for (let i = 0; i < 4000; i++) nested = [nested]
+    const raw = { items: [{ type, [type === 'file-tree' ? 'items' : 'pairs']: nested }] }
+    expect(() => normalizeGenuiSpec(raw)).not.toThrow()
+    const result = processGenuiSpec(raw)
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(() => JSON.stringify(result.spec)).not.toThrow()
+  })
+
+  it('rejects malformed arrays inside file-tree children while keeping normal siblings', () => {
+    let nested: unknown = { name: 'bad' }
+    for (let i = 0; i < 4000; i++) nested = [nested]
+    const result = processGenuiSpec({ items: [{ type: 'file-tree', items: [
+      { label: 'parent', children: [nested, { label: 'valid' }] },
+    ] }] })
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(result.spec?.items[0]).toEqual({ type: 'file-tree', items: [
+      { name: 'parent', type: 'dir', children: [{ name: 'valid' }] },
+    ] })
+  })
+
   /** `depth` wrapping `col` nodes around `leaf`; the root item sits at depth 0. */
   const chain = (depth: number, leaf: unknown = { type: 'text', content: 'leaf' }): Record<string, unknown> => {
     let node: unknown = leaf
